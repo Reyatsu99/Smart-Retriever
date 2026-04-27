@@ -13,11 +13,6 @@ from smart_retriever_v2.indexer import build_index
 from smart_retriever_v2.text_utils import tokenize
 from smart_retriever_v2.vector_index import VectorIndex
 
-try:
-    from sentence_transformers import CrossEncoder
-except ImportError:
-    CrossEncoder = None
-
 
 class SearchEngine:
     def __init__(self, index_dir: Path | str = settings.INDEX_DIR, embedder: EmbeddingBackend | None = None) -> None:
@@ -26,11 +21,8 @@ class SearchEngine:
         self.shard_payload = self._load_json(self.index_dir / "shard_metadata.json", default={})
         self.file_records = self._load_json(self.index_dir / "file_metadata.json", default=[])
         self.records_by_path = {record["relative_path"]: record for record in self.file_records}
-        self.cross_encoder = None
-        if CrossEncoder:
-            self.cross_encoder = CrossEncoder(settings.CROSS_ENCODER_MODEL_NAME)
 
-    def search(self, query: str, top_k: int = settings.DEFAULT_TOP_K, use_reranker: bool = True) -> list[dict[str, Any]]:
+    def search(self, query: str, top_k: int = settings.DEFAULT_TOP_K) -> list[dict[str, Any]]:
         if not self.shard_payload:
             raise FileNotFoundError("Index not found. Run `python cli.py index` first.")
 
@@ -64,35 +56,7 @@ class SearchEngine:
                 if not previous or base["score"] > previous["score"]:
                     merged[relative_path] = base
 
-        # Initial ranking
-        results = sorted(merged.values(), key=lambda item: item["score"], reverse=True)
-        # Fetch more candidates for re-ranking
-        candidates = results[:top_k * settings.SEARCH_CANDIDATE_MULTIPLIER]
-
-        if use_reranker and self.cross_encoder and candidates:
-            # Re-rank using CrossEncoder
-            pairs = [[query, item.get("content", item["file_name"])] for item in candidates]
-            # Since we didn't load full file content in SearchEngine, we fallback to filename
-            # Wait, better yet, we ideally want to rank on content. Let's just use existing score for now if content isn't loaded.
-            # Actually, let's load content if needed, but it might be slow.
-            # Let's read the first few lines of the file for ranking.
-            for i, item in enumerate(candidates):
-                file_path = self.index_dir.parent / "data" / item["relative_path"]
-                if file_path.exists() and file_path.suffix.lower() == ".txt":
-                    text = file_path.read_text(encoding="utf-8", errors="ignore")[:1000]
-                    pairs[i][1] = text
-            
-            cross_scores = self.cross_encoder.predict(pairs)
-            for item, x_score in zip(candidates, cross_scores):
-                item["cross_score"] = float(x_score)
-                item["score"] = float(x_score) # overwrite score with cross_score
-                item["matched_by"].append("cross_encoder")
-            
-            results = sorted(candidates, key=lambda item: item["score"], reverse=True)
-        else:
-            results = results[:top_k]
-
-        return results[:top_k]
+        return sorted(merged.values(), key=lambda item: item["score"], reverse=True)[:top_k]
 
     def _candidate_shards(self, query_vector: Any) -> list[str]:
         shard_index = VectorIndex.load(self.index_dir / self.shard_payload["artifact"])
