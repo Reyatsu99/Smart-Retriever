@@ -7,112 +7,111 @@ from pathlib import Path
 from typing import Any
 
 from smart_retriever_v2 import settings
-from smart_retriever_v2.bm25 import BM25Store
+from smart_retriever_v2.db import get_db
 from smart_retriever_v2.embeddings import EmbeddingBackend
 from smart_retriever_v2.indexer import build_index
-from smart_retriever_v2.text_utils import tokenize
-from smart_retriever_v2.vector_index import VectorIndex
 
 
 class SearchEngine:
     def __init__(self, index_dir: Path | str = settings.INDEX_DIR, embedder: EmbeddingBackend | None = None) -> None:
         self.index_dir = Path(index_dir)
         self.embedder = embedder or EmbeddingBackend()
-        self.shard_payload = self._load_json(self.index_dir / "shard_metadata.json", default={})
-        self.file_records = self._load_json(self.index_dir / "file_metadata.json", default=[])
-        self.records_by_path = {record["relative_path"]: record for record in self.file_records}
+        self.db = get_db(self.index_dir.parent / "lancedb_store")
+        
+        try:
+            from sentence_transformers import CrossEncoder
+            # We use a fast cross-encoder to prevent timeouts but boost precision significantly
+            self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
+        except Exception:
+            self.reranker = None
 
     def search(self, query: str, top_k: int = settings.DEFAULT_TOP_K) -> list[dict[str, Any]]:
-        if not self.shard_payload:
+        table_name = "document_chunks"
+        if table_name not in self.db.table_names():
             raise FileNotFoundError("Index not found. Run `python cli.py index` first.")
+            
+        table = self.db.open_table(table_name)
+        if table.count_rows() == 0:
+            return []
+            
+        query_vector = self.embedder.encode_document(query).tolist()
+        
+        # Stage 1: Hybrid Retrieval (Vector + Keyword)
+        pool_size = max(100, top_k * 10)
+        
+        # A. Vector Search
+        vector_hits = table.search(query_vector).limit(pool_size).to_arrow().to_pylist()
+        
+        # B. Keyword Search (FTS)
+        fts_hits = []
+        try:
+            fts_hits = table.search(query, query_type="fts").limit(pool_size).to_arrow().to_pylist()
+        except Exception as exc:
+            # FTS might not be initialized or query too short
+            pass
 
-        query_vector = self.embedder.encode_document(query)
-        query_tokens = tokenize(query)
-        candidates = self._candidate_shards(query_vector)
+        # C. Reciprocal Rank Fusion (RRF) to merge results
+        rrf_scores: dict[str, float] = {}
+        # k is the constant used in RRF formula (standard is 60)
+        RRF_K = 60
+        
+        hits_by_id: dict[str, dict[str, Any]] = {}
+        
+        # Function to add scores from a ranked list
+        def add_rrf_scores(ranked_list, source_name):
+            for rank, hit in enumerate(ranked_list):
+                # Use relative_path + chunk_id as unique key for chunks
+                hit_id = f"{hit['relative_path']}_{hit['chunk_id']}"
+                hits_by_id[hit_id] = hit
+                rrf_scores[hit_id] = rrf_scores.get(hit_id, 0.0) + 1.0 / (RRF_K + rank + 1)
+                hit.setdefault("matched_by", []).append(source_name)
+
+        add_rrf_scores(vector_hits, "vector")
+        add_rrf_scores(fts_hits, "keyword")
+        
+        # Get sorted hit IDs by RRF score
+        sorted_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)[:pool_size]
+        hits = [hits_by_id[hid] for hid in sorted_ids]
+        
+        if not hits:
+            return []
+            
+        # Stage 2: Semantic Reranking (Cross-Encoder)
+        if self.reranker:
+            pairs = [[query, hit["text"]] for hit in hits]
+            scores = self.reranker.predict(pairs)
+            for hit, score in zip(hits, scores):
+                hit["score"] = float(score)
+                hit["matched_by"].append("semantic_reranker")
+                hit["matched_by"] = sorted(list(set(hit["matched_by"])))
+        else:
+            # Fallback to normalized RRF score
+            for hit_id, score in rrf_scores.items():
+                hit = hits_by_id[hit_id]
+                hit["score"] = score
+                hit["matched_by"] = sorted(list(set(hit["matched_by"])))
+
+        # Aggregate top chunks back to Document level
         merged: dict[str, dict[str, Any]] = {}
+        for hit in hits:
+            rp = hit["relative_path"]
+            if rp not in merged or hit["score"] > merged[rp]["score"]:
+                merged[rp] = {
+                    "matched_by": hit["matched_by"],
+                    "relative_path": rp,
+                    "file_name": Path(rp).name,
+                    "path": str((settings.DATA_DIR / rp).resolve()),
+                    "score": hit["score"],
+                    "text": hit["text"],
+                    "shard": "v3_lancedb_chunk_" + str(hit["chunk_id"]),
+                    "mtime": hit["mtime"],
+                    "size": hit["size"],
+                    "sha256": hit["sha256"]
+                }
+                
+        final_results = sorted(merged.values(), key=lambda x: x["score"], reverse=True)[:top_k]
+        return final_results
 
-        for shard_name in candidates:
-            dense_scores = self._dense_scores(shard_name, query_vector, top_k)
-            bm25_scores = self._bm25_scores(shard_name, query_tokens, top_k)
-            for relative_path in set(dense_scores) | set(bm25_scores):
-                base = self._public_record(self.records_by_path[relative_path])
-                dense = dense_scores.get(relative_path, 0.0)
-                bm25 = bm25_scores.get(relative_path, 0.0)
-                filename_boost = self._filename_boost(base["file_name"], query_tokens)
-                matched_by = []
-                if dense > 0:
-                    matched_by.append("semantic_similarity")
-                if bm25 > 0:
-                    matched_by.append("bm25_keyword")
-                if filename_boost > 0:
-                    matched_by.append("filename_boost")
-
-                base["score"] = round(
-                    settings.DENSE_WEIGHT * dense + settings.BM25_WEIGHT * bm25 + filename_boost,
-                    4,
-                )
-                base["matched_by"] = matched_by
-                previous = merged.get(relative_path)
-                if not previous or base["score"] > previous["score"]:
-                    merged[relative_path] = base
-
-        return sorted(merged.values(), key=lambda item: item["score"], reverse=True)[:top_k]
-
-    def _candidate_shards(self, query_vector: Any) -> list[str]:
-        shard_index = VectorIndex.load(self.index_dir / self.shard_payload["artifact"])
-        count = min(settings.TOP_SHARD_COUNT, len(self.shard_payload.get("items", [])))
-        return [self.shard_payload["items"][index] for index, _ in shard_index.search(query_vector, max(count, 1))]
-
-    def _dense_scores(self, shard_name: str, query_vector: Any, top_k: int) -> dict[str, float]:
-        shard = self.shard_payload["shards"][shard_name]
-        mapping = self._load_json(self.index_dir / shard["meta_file"], default={}).get("items", [])
-        vector_index = VectorIndex.load(self.index_dir / shard["artifact"])
-        hits = vector_index.search(query_vector, min(len(mapping), top_k * settings.SEARCH_CANDIDATE_MULTIPLIER))
-        return {
-            mapping[index]: max(0.0, min(1.0, (score + 1.0) / 2.0))
-            for index, score in hits
-            if index < len(mapping)
-        }
-
-    def _bm25_scores(self, shard_name: str, query_tokens: list[str], top_k: int) -> dict[str, float]:
-        shard = self.shard_payload["shards"][shard_name]
-        mapping = self._load_json(self.index_dir / shard["meta_file"], default={}).get("items", [])
-        bm25 = BM25Store.load(self.index_dir / shard["bm25_file"])
-        raw_scores = bm25.scores(query_tokens)
-        max_score = max(raw_scores) if raw_scores else 0.0
-        ranked = sorted(enumerate(raw_scores), key=lambda item: item[1], reverse=True)[
-            : top_k * settings.SEARCH_CANDIDATE_MULTIPLIER
-        ]
-        return {
-            mapping[index]: (score / max_score if max_score else 0.0)
-            for index, score in ranked
-            if score > 0 and index < len(mapping)
-        }
-
-    def _filename_boost(self, file_name: str, query_tokens: list[str]) -> float:
-        if not query_tokens:
-            return 0.0
-        name_tokens = set(tokenize(file_name, expand_semantics=False))
-        overlap = len(name_tokens & set(query_tokens)) / len(set(query_tokens))
-        return round(settings.FILENAME_BOOST * overlap, 4)
-
-    @staticmethod
-    def _load_json(path: Path, default: Any) -> Any:
-        if not path.exists():
-            return default
-        return json.loads(path.read_text(encoding="utf-8"))
-
-    @staticmethod
-    def _public_record(record: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "file_name": record["file_name"],
-            "path": record["path"],
-            "relative_path": record["relative_path"],
-            "shard": record["shard"],
-            "size": record["size"],
-            "mtime": record["mtime"],
-            "sha256": record["sha256"],
-        }
 
 
 def _print_results(results: list[dict[str, Any]]) -> None:

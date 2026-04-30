@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import shutil
+import gc
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,7 @@ def run_public_evaluation(
     pool: str = "auto",
     pool_depth: int = 100,
     mode: str = "real",
+    force: bool = False,
     work_dir: Path | str = DEFAULT_EVAL_WORK_DIR,
     keep_workspace: bool = True,
 ) -> dict[str, Any]:
@@ -69,7 +71,7 @@ def run_public_evaluation(
     manifest = build_index(
         data_dir=data_dir,
         index_dir=index_dir,
-        force=False,
+        force=force,
         embedder=embedder,
     )
     print("Initializing SearchEngine...")
@@ -77,10 +79,13 @@ def run_public_evaluation(
 
     engine = SearchEngine(index_dir=index_dir, embedder=embedder)
     print(f"Running {len(selected_queries)} queries...")
-    run = _run_queries(engine, selected_queries, doc_mapping, top_k=top_k)
+    run_output = _run_queries(engine, selected_queries, doc_mapping, top_k=top_k)
+    run = run_output["run"]
+    avg_latency = run_output["avg_latency_ms"]
     
     print("Computing metrics...")
     metrics = _compute_metrics(run, qrels_by_query, top_k=top_k)
+    metrics["avg_latency_ms"] = round(avg_latency, 2)
     
     print("Summarizing results...")
     summary = _summarize_queries(run, qrels_by_query, top_k=top_k)
@@ -98,11 +103,11 @@ def run_public_evaluation(
         "top_k": top_k,
         "query_offset": query_offset,
         "queries_evaluated": len(selected_queries),
-        "documents_indexed": len(doc_mapping),
+        "documents_indexed": manifest.get("indexed_file_count", 0),
         "index_manifest": {
-            "indexed_file_count": manifest["indexed_file_count"],
-            "skipped_file_count": manifest["skipped_file_count"],
-            "shard_count": len(manifest["shards"]),
+            "indexed_file_count": manifest.get("indexed_file_count", 0),
+            "skipped_file_count": manifest.get("skipped_file_count", 0),
+            "chunk_count": manifest.get("indexed_chunks", 0),
         },
         "metrics": metrics,
         "query_summary": summary,
@@ -120,7 +125,9 @@ def run_public_evaluation(
         compact_report["paths"] = {"workspace": str(work_dir.resolve())}
         compact_report["workspace_deleted"] = True
         shutil.rmtree(work_dir)
+        gc.collect()
         return compact_report
+    gc.collect()
     return report
 
 
@@ -222,8 +229,6 @@ def _materialize_corpus(
     data_dir.mkdir(parents=True, exist_ok=True)
     if pool == "full":
         for ordinal, doc in enumerate(dataset.docs_iter()):
-            if ordinal >= 100: # Hard cap for safety
-                break
             relative_path = _relative_doc_path(ordinal)
             _write_doc_file(data_dir / relative_path, _doc_text(doc))
             doc_mapping[str(getattr(doc, "doc_id"))] = {
@@ -237,8 +242,6 @@ def _materialize_corpus(
     # Use docs_iter to avoid loading the entire docs_store into memory
     count = 0
     for doc in dataset.docs_iter():
-        if count >= 100: # Hard cap for safety
-            break
         doc_id = str(getattr(doc, "doc_id"))
         if doc_id in doc_ids:
             relative_path = _relative_doc_path(count)
@@ -284,8 +287,7 @@ def _candidate_doc_ids(
 
 
 def _relative_doc_path(ordinal: int) -> str:
-    exts = [".txt", ".docx", ".xlsx", ".csv"]
-    ext = exts[ordinal % len(exts)]
+    ext = ".txt"
     bucket = f"docs_{ordinal // 1000:05d}"
     return str(Path(bucket) / f"doc_{ordinal:07d}{ext}")
 
@@ -332,11 +334,18 @@ def _doc_text(doc: Any) -> str:
     return "\n".join(parts)
 
 
-def _run_queries(engine: Any, queries: list[EvalQuery], doc_mapping: dict[str, dict[str, str]], *, top_k: int) -> dict[str, list[dict[str, Any]]]:
+def _run_queries(engine: Any, queries: list[EvalQuery], doc_mapping: dict[str, dict[str, str]], *, top_k: int) -> dict[str, Any]:
+    import time
     doc_id_by_path = {payload["relative_path"]: doc_id for doc_id, payload in doc_mapping.items()}
-    run: dict[str, list[dict[str, Any]]] = {}
+    run_results: dict[str, list[dict[str, Any]]] = {}
+    latencies = []
+    
     for query in queries:
+        start_time = time.perf_counter()
         results = engine.search(query.text, top_k=top_k)
+        end_time = time.perf_counter()
+        latencies.append((end_time - start_time) * 1000) # ms
+        
         converted: list[dict[str, Any]] = []
         for rank, result in enumerate(results, start=1):
             doc_id = doc_id_by_path.get(result["relative_path"])
@@ -350,8 +359,12 @@ def _run_queries(engine: Any, queries: list[EvalQuery], doc_mapping: dict[str, d
                     "relative_path": result["relative_path"],
                 }
             )
-        run[query.query_id] = converted
-    return run
+        run_results[query.query_id] = converted
+        
+    return {
+        "run": run_results,
+        "avg_latency_ms": sum(latencies) / len(latencies) if latencies else 0.0
+    }
 
 
 def _compute_metrics(run: dict[str, list[dict[str, Any]]], qrels_by_query: dict[str, dict[str, int]], *, top_k: int) -> dict[str, float]:
@@ -360,6 +373,8 @@ def _compute_metrics(run: dict[str, list[dict[str, Any]]], qrels_by_query: dict[
         ir_measures.parse_measure(f"nDCG@{top_k}"),
         ir_measures.parse_measure(f"RR@{top_k}"),
         ir_measures.parse_measure(f"R@{top_k}"),
+        ir_measures.parse_measure(f"P@{top_k}"),
+        ir_measures.parse_measure("AP"),
     ]
     qrels = {query_id: {doc_id: relevance for doc_id, relevance in docrels.items()} for query_id, docrels in qrels_by_query.items()}
     scored_run = {query_id: {item["doc_id"]: float(item["score"]) for item in ranked_docs} for query_id, ranked_docs in run.items()}
@@ -368,6 +383,8 @@ def _compute_metrics(run: dict[str, list[dict[str, Any]]], qrels_by_query: dict[
         f"ndcg@{top_k}": round(float(aggregate[measures[0]]), 4),
         f"mrr@{top_k}": round(float(aggregate[measures[1]]), 4),
         f"recall@{top_k}": round(float(aggregate[measures[2]]), 4),
+        f"precision@{top_k}": round(float(aggregate[measures[3]]), 4),
+        "map": round(float(aggregate[measures[4]]), 4),
         f"success@{top_k}": round(_success_at_k(run, qrels_by_query, top_k=top_k), 4),
     }
 

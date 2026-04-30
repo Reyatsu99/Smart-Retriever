@@ -1,7 +1,7 @@
 import sys
-import json
 import traceback
 import ast
+import argparse
 from pathlib import Path
 
 # Add project root to path so we can import our package
@@ -13,9 +13,22 @@ if not hasattr(ast, "Num"):
         def __init__(self, n, **kwargs):
             super().__init__(value=n, **kwargs)
             self.n = n
+        @property
+        def n(self):
+            return self.value
     ast.Num = Num
-    ast.Str = ast.Constant
+
+if not hasattr(ast, "Str"):
+    class Str(ast.Constant):
+        @property
+        def s(self):
+            return self.value
+    ast.Str = Str
+
+# Map other missing names
+if not hasattr(ast, "NameConstant"):
     ast.NameConstant = ast.Constant
+if not hasattr(ast, "Bytes"):
     ast.Bytes = ast.Constant
 
 try:
@@ -27,38 +40,50 @@ except ImportError as e:
 def print_metrics(dataset_name, report):
     m = report["metrics"]
     print(f"\n--- Results for {dataset_name} ---")
-    print(f"nDCG@10 (Ranking Quality): {m.get('ndcg@10', 'N/A')}")
-    print(f"MRR@10  (Speed to First Hit): {m.get('mrr@10', 'N/A')}")
-    print(f"Recall@10 (Completeness):    {m.get('recall@10', 'N/A')}")
+    print(f"nDCG@10 (Ranking):    {m.get('ndcg@10', 'N/A')}")
+    print(f"MRR@10  (Precision):  {m.get('mrr@10', 'N/A')}")
+    print(f"Recall@10 (Recall):   {m.get('recall@10', 'N/A')}")
+    print(f"Precision@10 (P@10):  {m.get('precision@10', 'N/A')}")
+    print(f"MAP (Global Precision): {m.get('map', 'N/A')}")
+    print(f"Success@10 (Hit Rate): {m.get('success@10', 'N/A')}")
+    print(f"Avg Latency (Speed):   {m.get('avg_latency_ms', 'N/A')} ms/query")
     print(f"Docs Indexed: {report.get('documents_indexed', 0)}")
     print(f"Queries Tested: {report.get('queries_evaluated', 0)}")
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--max-queries", type=int, default=50)
+    args = parser.parse_args()
+
     datasets = [
-        ("NFCorpus (Medical/Technical)", "beir/nfcorpus"),
-        ("SciFact (Scientific Verification)", "beir/scifact")
+        ("NFCorpus (Medical)", "beir/nfcorpus", "full", 100),
+        ("SciFact (Scientific)", "beir/scifact", "full", 100),
+        ("FiQA (Finance)", "beir/fiqa", "full", 100),
+        ("DBPedia (General)", "beir/dbpedia-entity", "scoreddocs", 100),
+        ("Quora (QA/Duplicates)", "beir/quora", "scoreddocs", 100)
     ]
 
-    print("Smart File Retriever V2 - Benchmark Suite")
-    print("Evaluating metrics: nDCG (Ranking), MRR (Precision), Recall (Coverage)")
+    print("Smart File Retriever V3 - Multi-Domain 3D Benchmark Suite")
+    print("Evaluating: Quality (nDCG/MAP), Speed (Latency), and Coverage (Recall)")
     
-    for label, ds_id in datasets:
+    for label, ds_id, pool_mode, pool_depth in datasets:
         print(f"\nSearching for {label} benchmarks...")
         try:
-            # We limit to 50 queries for a quick test; remove max_queries for full evaluation
             report = run_public_evaluation(
                 dataset_id=ds_id,
-                max_queries=50, 
-                work_dir=Path(f".benchmarks/eval_{ds_id}"),
-                mode="real"
+                max_queries=args.max_queries, 
+                force=args.force,
+                work_dir=Path(f".benchmarks/eval_{ds_id.replace('/', '_')}"),
+                mode="real",
+                pool=pool_mode,
+                pool_depth=pool_depth,
+                keep_workspace=True
             )
             print_metrics(label, report)
         except Exception as e:
             print(f"Failed to run {label}: {e}")
-            traceback.print_exc()
-            if "ir_datasets" in str(e):
-                print("\nSuggestion: install dependencies to run benchmarks:")
-                print("pip install ir_datasets ir_measures docx python-docx openpyxl")
+            # traceback.print_exc()
 
 if __name__ == "__main__":
     main()

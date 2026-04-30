@@ -40,28 +40,41 @@ def chunk_text(text: str, chunk_size: int | None = None, overlap: int | None = N
 
     chunk_size = chunk_size or settings.MAX_CHUNK_CHARS
     overlap = overlap or settings.CHUNK_OVERLAP_CHARS
-    paragraphs = [part.strip() for part in text.splitlines() if part.strip()]
-    if not paragraphs:
-        paragraphs = [text]
+    
+    # Separation priority: paragraphs, lines, sentences, spaces
+    separators = ["\n\n", "\n", ". ", " ", ""]
+    
+    def split_text(txt: str, seps: list[str]) -> list[str]:
+        if len(txt) <= chunk_size:
+            return [txt]
+        
+        if not seps:
+            return [txt[i:i+chunk_size] for i in range(0, len(txt), chunk_size - overlap)]
+            
+        sep = seps[0]
+        parts = txt.split(sep)
+        
+        final_parts = []
+        current_part = ""
+        
+        for p in parts:
+            if current_part and len(current_part) + len(sep) + len(p) > chunk_size:
+                final_parts.append(current_part)
+                # Keep overlap from previous part
+                current_part = current_part[-overlap:] + sep + p if overlap else p
+            else:
+                current_part = (current_part + sep + p) if current_part else p
+        
+        if current_part:
+            # If the resulting part is still too big, go to next separator
+            if len(current_part) > chunk_size:
+                final_parts.extend(split_text(current_part, seps[1:]))
+            else:
+                final_parts.append(current_part)
+                
+        return final_parts
 
-    chunks: list[str] = []
-    current: list[str] = []
-    current_len = 0
-    for paragraph in paragraphs:
-        extra = len(paragraph) + (1 if current else 0)
-        if current and current_len + extra > chunk_size:
-            chunks.append("\n".join(current))
-            joined = "\n".join(current)
-            tail = joined[-overlap:] if overlap else ""
-            current = [tail, paragraph] if tail else [paragraph]
-            current_len = len("\n".join(current))
-            continue
-        current.append(paragraph)
-        current_len += extra
-
-    if current:
-        chunks.append("\n".join(current))
-    return chunks
+    return [c.strip() for c in split_text(text, separators) if c.strip()]
 
 
 def sha256_file(path: Path) -> str:
