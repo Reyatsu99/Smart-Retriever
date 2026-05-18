@@ -1,13 +1,13 @@
 import os
 import json
 from pathlib import Path
-from smart_retriever_v2.indexer import build_index
-from smart_retriever_v2.auditor import DocumentAuditor
-from smart_retriever_v2.search import SearchEngine
-from smart_retriever_v2 import settings
+from smart_retriever.indexer import build_index
+from smart_retriever.auditor import DocumentAuditor
+from smart_retriever.search import SearchEngine
+from smart_retriever import settings
 
 def setup_test_data():
-    data_dir = Path("v3_test_data")
+    data_dir = Path("test_data")
     data_dir.mkdir(exist_ok=True)
     
     # 1. A Genuine File
@@ -32,11 +32,11 @@ def setup_test_data():
     
     return data_dir
 
-def run_v3_test():
+def run_test():
     data_dir = setup_test_data()
-    index_dir = Path("v3_test_index")
+    index_dir = Path("test_index")
     
-    print("--- Building V3 Test Index ---")
+    print("--- Building Test Index ---")
     # Build a fresh index for this test
     build_index(data_dir, index_dir, force=True)
     
@@ -71,4 +71,4 @@ def run_v3_test():
         print("Tip: Ensure 'ollama serve' is running and 'ollama pull phi3' has been executed.")
 
 if __name__ == "__main__":
-    run_v3_test()
+    run_test()

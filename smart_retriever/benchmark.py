@@ -10,10 +10,10 @@ from typing import Any
 
 import numpy as np
 
-from smart_retriever_v2 import settings
-from smart_retriever_v2.embeddings import EmbeddingBackend
-from smart_retriever_v2.indexer import build_index
-from smart_retriever_v2.text_utils import tokenize
+from smart_retriever import settings
+from smart_retriever.embeddings import EmbeddingBackend
+from smart_retriever.indexer import build_index
+from smart_retriever.text_utils import tokenize
 
 QUERY_TEMPLATES = {
     "finance": "budget report for {subject}",
@@ -71,7 +71,7 @@ def run_benchmark(
     manifest = build_index(data_dir, index_dir, embedder=embedder)
     index_seconds = time.perf_counter() - started
 
-    from smart_retriever_v2.search import SearchEngine
+    from smart_retriever.search import SearchEngine
 
     search_engine = SearchEngine(index_dir, embedder=embedder)
     query_set = corpus[: min(queries, len(corpus))]

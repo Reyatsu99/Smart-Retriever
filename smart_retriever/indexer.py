@@ -3,12 +3,12 @@ import gc
 from pathlib import Path
 from typing import Any
 
-from smart_retriever_v2 import settings
-from smart_retriever_v2.db import get_db, get_or_create_table
-from smart_retriever_v2.embeddings import EmbeddingBackend
-from smart_retriever_v2.parsers import extract_text
-from smart_retriever_v2.text_utils import sha256_file, chunk_text
-from smart_retriever_v2.llm import LocalLLM
+from smart_retriever import settings
+from smart_retriever.db import get_db, get_or_create_table
+from smart_retriever.embeddings import EmbeddingBackend
+from smart_retriever.parsers import extract_text
+from smart_retriever.text_utils import sha256_file, chunk_text
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -64,19 +64,6 @@ def build_index(
 
         try:
             raw_text = extract_text(path)
-            
-            # --- NOVEL LLM-AUGMENTED INDEXING ---
-            # We use the local LLM to generate a summary and hypothetical questions (HyDE-style)
-            # at ingestion time. This enriches the vector embeddings and sparse keyword index
-            # with implicit concepts that weren't in the original text.
-            llm = LocalLLM()
-            if llm.available:
-                prompt = f"Analyze this document and generate a 2-sentence summary, plus 3 hypothetical search queries it answers:\n\n{raw_text[:3000]}"
-                enrichment = llm.generate(prompt, system_prompt="You are a data enrichment AI. Output ONLY the summary and questions, no other chat.")
-                
-                # Prepend the LLM context so every chunk can potentially benefit, or it forms its own highly-dense chunk
-                raw_text = f"--- ENRICHED LLM CONTEXT ---\n{enrichment}\n\n--- ORIGINAL CONTENT ---\n{raw_text}"
-
             chunks = [c for c in chunk_text(raw_text) if c.strip()]
             
             for chunk_id, chunk in enumerate(chunks):

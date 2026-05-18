@@ -6,10 +6,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from smart_retriever_v2 import settings
-from smart_retriever_v2.db import get_db
-from smart_retriever_v2.embeddings import EmbeddingBackend
-from smart_retriever_v2.indexer import build_index
+from smart_retriever import settings
+from smart_retriever.db import get_db
+from smart_retriever.embeddings import EmbeddingBackend
+from smart_retriever.indexer import build_index
 
 
 class SearchEngine:
@@ -300,7 +300,7 @@ def _run_menu() -> int:
                 index_dir = _prompt("Index folder", str(settings.INDEX_DIR))
                 
                 engine = SearchEngine(index_dir=index_dir)
-                from smart_retriever_v2.auditor import DocumentAuditor
+                from smart_retriever.auditor import DocumentAuditor
                 auditor = DocumentAuditor(engine)
                 reports = auditor.audit(query, requirements)
                 
@@ -326,7 +326,7 @@ def _run_menu() -> int:
                 index_dir = _prompt("Index folder", str(settings.INDEX_DIR))
                 
                 engine = SearchEngine(index_dir=index_dir)
-                from smart_retriever_v2.auditor import DocumentAuditor
+                from smart_retriever.auditor import DocumentAuditor
                 auditor = DocumentAuditor(engine)
                 reports = auditor.auto_verify(query)
                 
@@ -420,7 +420,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "audit":
         engine = SearchEngine(args.index_dir)
-        from smart_retriever_v2.auditor import DocumentAuditor
+        from smart_retriever.auditor import DocumentAuditor
         auditor = DocumentAuditor(engine)
         
         if args.reqs:

@@ -1,7 +1,7 @@
 import lancedb
 import pyarrow as pa
 from pathlib import Path
-from smart_retriever_v2 import settings
+from smart_retriever import settings
 
 def get_db(db_path: Path | str | None = None) -> lancedb.DBConnection:
     """Connects to the local LanceDB instance."""

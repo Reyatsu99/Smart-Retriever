@@ -4,8 +4,8 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Any, Optional
 
-from smart_retriever_v2.search import SearchEngine
-from smart_retriever_v2 import settings
+from smart_retriever.search import SearchEngine
+from smart_retriever import settings
 
 app = FastAPI(title="Smart Retriever V3 Private API")
 
