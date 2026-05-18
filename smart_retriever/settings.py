@@ -1,10 +1,10 @@
 from pathlib import Path
 
 DATA_DIR = Path("data")
-INDEX_DIR = Path("index_v2")
-TMP_INDEX_DIR = Path("index_v2_tmp")
-BACKUP_INDEX_DIR = Path("index_v2_backup")
-MANIFEST_BACKUP_NAME = "manifest_v2.backup.json"
+INDEX_DIR = Path("index")
+TMP_INDEX_DIR = Path("index_tmp")
+BACKUP_INDEX_DIR = Path("index_backup")
+MANIFEST_BACKUP_NAME = "manifest.backup.json"
 
 MANIFEST_VERSION = 3
 EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"

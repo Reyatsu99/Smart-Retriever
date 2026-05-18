@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from smart_retriever_v2 import settings
+from smart_retriever import settings
 
 
 def normalize_text(text: str) -> str:

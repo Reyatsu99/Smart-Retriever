@@ -12,9 +12,9 @@ from typing import Any
 import docx
 import openpyxl
 
-from smart_retriever_v2.benchmark import StubEmbedder
-from smart_retriever_v2.embeddings import EmbeddingBackend
-from smart_retriever_v2.indexer import build_index
+from smart_retriever.benchmark import StubEmbedder
+from smart_retriever.embeddings import EmbeddingBackend
+from smart_retriever.indexer import build_index
 
 
 DEFAULT_EVAL_WORK_DIR = Path(".benchmarks/v2/public/latest")
@@ -75,7 +75,7 @@ def run_public_evaluation(
         embedder=embedder,
     )
     print("Initializing SearchEngine...")
-    from smart_retriever_v2.search import SearchEngine
+    from smart_retriever.search import SearchEngine
 
     engine = SearchEngine(index_dir=index_dir, embedder=embedder)
     print(f"Running {len(selected_queries)} queries...")

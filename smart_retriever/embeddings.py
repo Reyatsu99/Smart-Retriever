@@ -6,8 +6,8 @@ from typing import Iterable
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from smart_retriever_v2 import settings
-from smart_retriever_v2.text_utils import chunk_text
+from smart_retriever import settings
+from smart_retriever.text_utils import chunk_text
 
 
 @lru_cache(maxsize=2)

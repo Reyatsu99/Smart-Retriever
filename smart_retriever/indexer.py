@@ -3,11 +3,11 @@ import gc
 from pathlib import Path
 from typing import Any
 
-from smart_retriever_v2 import settings
-from smart_retriever_v2.db import get_db, get_or_create_table
-from smart_retriever_v2.embeddings import EmbeddingBackend
-from smart_retriever_v2.parsers import extract_text
-from smart_retriever_v2.text_utils import sha256_file, chunk_text
+from smart_retriever import settings
+from smart_retriever.db import get_db, get_or_create_table
+from smart_retriever.embeddings import EmbeddingBackend
+from smart_retriever.parsers import extract_text
+from smart_retriever.text_utils import sha256_file, chunk_text
 
 LOGGER = logging.getLogger(__name__)
 

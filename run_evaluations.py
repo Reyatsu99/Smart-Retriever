@@ -32,7 +32,7 @@ if not hasattr(ast, "Bytes"):
     ast.Bytes = ast.Constant
 
 try:
-    from smart_retriever_v2.evaluation import run_public_evaluation
+    from smart_retriever.evaluation import run_public_evaluation
 except ImportError as e:
     print(f"Error: Could not import evaluation modules. {e}")
     sys.exit(1)

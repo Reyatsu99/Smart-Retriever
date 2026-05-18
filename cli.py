@@ -1,4 +1,4 @@
-from smart_retriever_v2.search import main
+from smart_retriever.search import main
 
 
 if __name__ == "__main__":

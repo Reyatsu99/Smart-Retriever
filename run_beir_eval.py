@@ -17,13 +17,13 @@ if not hasattr(ast, "Str"):
     ast.Str = Str
 
 sys.path.append(".")
-from smart_retriever_v2.evaluation import run_public_evaluation
+from smart_retriever.evaluation import run_public_evaluation
 
-print("Starting V3 Test Run (5 queries)...")
+print("Starting Evaluation Test Run (5 queries)...")
 report = run_public_evaluation(
     dataset_id="beir/nfcorpus",
     max_queries=5, 
-    work_dir=Path(".benchmarks/v3_test"),
+    work_dir=Path(".benchmarks/eval_test"),
     mode="real"
 )
 print("Finished!")

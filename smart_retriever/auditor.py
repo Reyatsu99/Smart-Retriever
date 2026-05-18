@@ -2,8 +2,8 @@ import logging
 from typing import Any, List, Dict
 from pathlib import Path
 
-from smart_retriever_v2.search import SearchEngine
-from smart_retriever_v2.llm import LocalLLM
+from smart_retriever.search import SearchEngine
+from smart_retriever.llm import LocalLLM
 
 LOGGER = logging.getLogger(__name__)
 
