@@ -253,7 +253,9 @@ def _run_menu() -> int:
         print("2. Create sample files for a quick demo")
         print("3. Build or update index")
         print("4. Search files")
-        print("5. Exit")
+        print("5. Audit documents (Manual Verification)")
+        print("6. Auto-Verify documents (Autonomous)")
+        print("7. Exit")
         choice = input("> ").strip()
 
         try:
@@ -292,10 +294,64 @@ def _run_menu() -> int:
                 _print_results(results)
                 print()
             elif choice == "5":
+                query = _prompt("Search query for audit")
+                req_str = _prompt("Enter requirements (comma-separated)")
+                requirements = [r.strip() for r in req_str.split(",") if r.strip()]
+                index_dir = _prompt("Index folder", str(settings.INDEX_DIR))
+                
+                engine = SearchEngine(index_dir=index_dir)
+                from smart_retriever_v2.auditor import DocumentAuditor
+                auditor = DocumentAuditor(engine)
+                reports = auditor.audit(query, requirements)
+                
+                print("\nAUDIT RESULTS:\n" + "="*40)
+                for r in reports:
+                    audit_data = r['audit']
+                    is_authentic = audit_data.get("is_authentic", True)
+                    status_prefix = "[VERIFIED]" if is_authentic else "[!!! BOGUS / SPOOFED !!!]"
+                    
+                    print(f"\nFILE: {r['file_name']} {status_prefix}")
+                    if not is_authentic:
+                        print(f"  Warning: {audit_data.get('authenticity_reason')}")
+                        
+                    if "requirements" in audit_data:
+                        for req in audit_data["requirements"]:
+                            status = req.get("status", "UNKNOWN")
+                            print(f"- [{status}] {req.get('name')}")
+                            if req.get("reason"): print(f"  Reason: {req['reason']}")
+                    print(f"Summary: {audit_data.get('overall_summary', 'N/A')}")
+                print("="*40 + "\n")
+            elif choice == "6":
+                query = _prompt("Search query for autonomous verification")
+                index_dir = _prompt("Index folder", str(settings.INDEX_DIR))
+                
+                engine = SearchEngine(index_dir=index_dir)
+                from smart_retriever_v2.auditor import DocumentAuditor
+                auditor = DocumentAuditor(engine)
+                reports = auditor.auto_verify(query)
+                
+                print("\nAUTO-VERIFICATION RESULTS:\n" + "="*40)
+                for r in reports:
+                    audit_data = r['audit']
+                    is_authentic = audit_data.get("is_authentic", True)
+                    status_prefix = "[VERIFIED]" if is_authentic else "[!!! BOGUS / SPOOFED !!!]"
+                    
+                    print(f"\nFILE: {r['file_name']} {status_prefix}")
+                    if not is_authentic:
+                        print(f"  Warning: {audit_data.get('authenticity_reason')}")
+
+                    if "requirements" in audit_data:
+                        for req in audit_data["requirements"]:
+                            status = req.get("status", "UNKNOWN")
+                            print(f"- [{status}] {req.get('name')}")
+                            if req.get("reason"): print(f"  Reason: {req['reason']}")
+                    print(f"Summary: {audit_data.get('overall_summary', 'N/A')}")
+                print("="*40 + "\n")
+            elif choice == "7":
                 print("Goodbye.")
                 return 0
             else:
-                print("Please choose 1, 2, 3, 4, or 5.\n")
+                print("Please choose 1, 2, 3, 4, 5, 6, or 7.\n")
         except KeyboardInterrupt:
             print("\nOperation cancelled.\n")
         except Exception as exc:
@@ -325,6 +381,12 @@ def main(argv: list[str] | None = None) -> int:
     search_parser.add_argument("--top-k", type=int, default=settings.DEFAULT_TOP_K)
     search_parser.add_argument("--json", action="store_true")
 
+    audit_parser = subparsers.add_parser("audit", help="Audit documents against requirements")
+    audit_parser.add_argument("query")
+    audit_parser.add_argument("--reqs", help="Comma-separated list of requirements (optional, triggers auto-mode if omitted)")
+    audit_parser.add_argument("--index-dir", default=str(settings.INDEX_DIR))
+    audit_parser.add_argument("--top-k", type=int, default=3)
+
     args = parser.parse_args(argv)
     if args.command == "menu":
         return _run_menu()
@@ -348,10 +410,26 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(manifest, indent=2))
         return 0
 
-    results = SearchEngine(args.index_dir).search(args.query, top_k=args.top_k)
-    if args.json:
-        print(json.dumps(results, indent=2))
+    if args.command == "search":
+        results = SearchEngine(args.index_dir).search(args.query, top_k=args.top_k)
+        if args.json:
+            print(json.dumps(results, indent=2))
+        else:
+            _print_results(results)
         return 0
 
-    _print_results(results)
+    if args.command == "audit":
+        engine = SearchEngine(args.index_dir)
+        from smart_retriever_v2.auditor import DocumentAuditor
+        auditor = DocumentAuditor(engine)
+        
+        if args.reqs:
+            requirements = [r.strip() for r in args.reqs.split(",") if r.strip()]
+            reports = auditor.audit(args.query, requirements, top_k=args.top_k)
+        else:
+            reports = auditor.auto_verify(args.query, top_k=args.top_k)
+            
+        print(json.dumps(reports, indent=2))
+        return 0
+
     return 0
