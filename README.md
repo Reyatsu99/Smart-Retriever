@@ -1,93 +1,91 @@
 # Smart File Retriever V3
 
-Smart File Retriever is an advanced, fully local document search and verification engine. It evolves traditional Information Retrieval (IR) into an autonomous logical agent, running 100% locally to ensure strict enterprise data privacy.
+Smart File Retriever V3 is an advanced, fully local document search engine. It features a novel **Generative LLM-Augmented Ingestion** pipeline, running 100% locally to ensure strict enterprise data privacy while delivering state-of-the-art semantic search accuracy.
 
-V3 introduces a powerful four-phase architecture:
-1. **Phase 1: Ingestion & Smart Chunking** - NLP-aware hierarchical chunking using BGE embeddings and LanceDB.
-2. **Phase 2: Hybrid Search & Fusion** - Simultaneous semantic vector and sparse keyword search merged via Reciprocal Rank Fusion (RRF).
-3. **Phase 3: Cross-Encoder Reranking** - Deep cross-attention transformer model to refine the top results based on logical linguistic nuance.
-4. **Phase 4: Autonomous Auditor & Authenticity Guard** - Local LLM integration (Ollama) to autonomously verify documents against query constraints and flag adversarial/spoofed files.
+## 🚀 The Core Innovation: Forward-HyDE (LLM Ingestion Enrichment)
 
-## Prerequisites
+Traditional RAG systems perform **HyDE** (Hypothetical Document Embeddings) at *search time*, adding massive latency to every user query. 
 
-To use the **Phase 4 Autonomous Auditor**, you must have [Ollama](https://ollama.com/) installed and running locally with the `phi3` model (or update the model name in the code):
+Smart File Retriever V3 introduces **Forward-HyDE**—performing LLM enrichment at *ingestion time*:
+1. **Dynamic Context Generation:** For every document ingested, the local LLM generates a concise semantic summary and 3-5 hypothetical search queries that the document is uniquely suited to answer.
+2. **Pre-Chunking Enrichment:** This LLM-generated context is prepended to the document *before* chunking and vectorization.
+3. **High-Fidelity Semantic Anchors:** Both the dense vector database (LanceDB) and the sparse search engine (Tantivy) index these synthetic questions, ensuring that plain-English queries match perfectly even if the original document is full of complex technical jargon—all with **zero added search-time latency**.
+
+---
+
+## 🛠️ Complete V3 Search Architecture
+
+The search engine functions as a highly optimized pipeline:
+
+1. **LLM Ingestion Enrichment:** Generates synthetic questions and summaries for each file using a local LLM via Ollama.
+2. **NLP-Aware Hierarchical Chunking:** Splits the enriched text at natural structural boundaries (paragraphs, sentences) with adaptive, clean-cut word boundary overlaps to prevent context truncation.
+3. **Hybrid Dense/Sparse Retrieval:** Concurrently performs a semantic vector search (LanceDB) and a full-text sparse search (BM25) on the corpus.
+4. **Reciprocal Rank Fusion (RRF):** Exponentially merges both result lists based on their rank positions to yield the ultimate candidate list.
+5. **Cross-Encoder Reranking:** Applies a deep cross-attention transformer (`ms-marco-MiniLM-L-6-v2`) to perform simultaneous query-document logic evaluation, delivering high-precision final rankings.
+
+---
+
+## ⚙️ Prerequisites
+
+To run the LLM-augmented indexing, you must have [Ollama](https://ollama.com/) running locally with your model of choice (defaults to `phi3`):
+
 ```bash
-# Start Ollama server in a separate terminal
+# Start Ollama service in a separate terminal
 ollama serve
 
 # Pull the default model
 ollama run phi3
 ```
 
-## Quick Start
+---
 
+## 💻 Quick Start
+
+### 1. Install Dependencies
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
+```
+
+### 2. Launch the Menu-Driven CLI
+```bash
 python cli.py
 ```
+From the interactive menu, you can:
+* Check project status
+* Create demo sample files
+* Build/Update the LLM-augmented index
+* Search your files
 
-The easiest first run is:
-1. Run `python cli.py`
-2. Choose `Check project status`
-3. Choose `Create sample files for a quick demo` if your `data/` folder is empty
-4. Choose `Build or update index`
-5. Choose `Search files`
-6. Choose `Auto-Verify documents (Autonomous)` to see the LLM auditor in action!
-
-If you prefer commands instead of the menu:
+### 3. Run via Commands
 ```bash
-python cli.py status
+# Generate mock demo data
 python cli.py sample-data
-python cli.py index
-python cli.py search "budget forecast"
+
+# Build the LLM-enriched search index (forces full rebuild)
+python cli.py index --force
+
+# Search the index
+python cli.py search "Alex offer letter compensation details"
 ```
 
-## Advanced Commands (Auditor & Anti-Spoofing)
+---
 
-Use the CLI to run zero-shot compliance checks on your local documents:
-
-```bash
-# Autonomous extraction of requirements & verification
-python cli.py audit "Find the offer letter for Alex with salary details"
-
-# Manual requirement specification
-python cli.py audit "Find Alex's offer" --reqs "Must be a policy document, Must be dated 2024, Must contain salary"
-```
-
-## Folder Setup
-
-Put your documents inside the `data/` folder before indexing.
-
-Supported file types:
-- `.txt`, `.md`, `.csv`, `.pdf`, `.docx`, `.xlsx`
-
-## Project Layout
+## 📂 Project Layout
 
 ```text
 smart_retriever_v2/
-  auditor.py       # Phase 4: Autonomous Auditor & Authenticity Guard
-  llm.py           # Local LLM integration (Ollama)
-  db.py            # LanceDB vector database management
-  embeddings.py    # Dense vector encoding (BGE)
-  indexer.py       # Incremental indexing pipeline
-  parsers.py       # File parsing (PDF, Word, etc.)
-  search.py        # Core search engine & CLI (Phase 2 & 3)
-  settings.py
-  text_utils.py    # Phase 1: Smart NLP-Aware Chunking
-cli.py             # Main entrypoint
-v3_adversarial_test.py # Test suite for anti-spoofing
-data/
+  llm.py           # Local LLM wrapper (Ollama)
+  db.py            # LanceDB vector store initialization
+  embeddings.py    # BGE dense vector embeddings
+  indexer.py       # LLM-Augmented index builder (Forward-HyDE)
+  parsers.py       # Rich parser support (.pdf, .docx, .xlsx, .txt)
+  search.py        # Core search engine, CLI, & RRF
+  settings.py      # App configurations
+  text_utils.py    # Smart hierarchical chunking
+cli.py             # CLI Entrypoint
+data/              # Put your document corpus here
 ```
-
-## Submission Bundle
-
-To build the clean submission zip for V3:
-
-```bash
-python scripts/build_submission.py
-```
-*(Ensure `scripts/build_submission.py` is updated for V3 targets.)*
 
 Author signature: Reyatsu99
