@@ -90,4 +90,4 @@ python scripts/build_submission.py
 ```
 *(Ensure `scripts/build_submission.py` is updated for project targets.)*
 
-Author signature: Reyatsu99
+
