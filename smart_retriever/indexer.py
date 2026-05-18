@@ -119,7 +119,7 @@ def build_index(
     indexed_files = len(changes["added"]) + len(changes["modified"]) + changes["unchanged"]
 
     manifest = {
-        "version": 4,  # Flagging V3 Architecture
+        "version": 4,
         "data_dir": str(data_dir),
         "embedding_model": embedder.model_name,
         "indexed_file_count": indexed_files,
