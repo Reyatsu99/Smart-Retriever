@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Search (Private Offline Node)</title>
+    <!-- Use basic styles to keep it fully offline without CDN reliance -->
+    <style>
+        :root {
+            --primary: #3b82f6;
+            --primary-glow: rgba(59, 130, 246, 0.5);
+            --accent: #8b5cf6;
+            --bg-color: #020617;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text-color: #f8fafc;
+            --muted: #94a3b8;
+            --border: rgba(51, 65, 85, 0.5);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, system-ui, sans-serif;
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(circle at 0% 0%, rgba(59, 130, 246, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 100% 100%, rgba(139, 92, 246, 0.15) 0%, transparent 50%);
+            color: var(--text-color);
+            margin: 0;
+            padding: 3rem 1rem;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            animation: fadeIn 0.8s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3.5rem;
+        }
+        
+        .header h1 { 
+            margin: 0; 
+            font-size: 3rem; 
+            font-weight: 800;
+            background: linear-gradient(to right, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.025em;
+        }
+        .header p { 
+            color: var(--muted); 
+            margin-top: 0.75rem; 
+            font-size: 1.1rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .search-box {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 3rem;
+            padding: 0.5rem;
+            background: rgba(30, 41, 59, 0.4);
+            backdrop-filter: blur(12px);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .search-box:focus-within {
+            border-color: var(--primary);
+            box-shadow: 0 0 20px var(--primary-glow);
+        }
+
+        input {
+            flex: 1;
+            padding: 1.2rem 1.5rem;
+            font-size: 1.2rem;
+            border: none;
+            background: transparent;
+            color: white;
+            outline: none;
+        }
+
+        button {
+            padding: 0 2.5rem;
+            font-size: 1.1rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+        }
+        button:hover { 
+            transform: scale(1.02);
+            filter: brightness(1.1);
+        }
+        
+        #loader {
+            display: none;
+            text-align: center;
+            color: var(--primary);
+            margin-bottom: 2rem;
+            font-weight: 500;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .result-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(8px);
+            padding: 2rem;
+            border-radius: 20px;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .result-card:hover {
+            transform: translateX(5px);
+            border-color: var(--primary);
+            background: rgba(30, 41, 59, 0.9);
+        }
+
+        .result-card h3 {
+            margin: 0 0 0.75rem 0;
+            color: #fff;
+            font-size: 1.4rem;
+            font-weight: 700;
+        }
+        
+        .result-meta {
+            font-size: 0.85rem;
+            color: var(--muted);
+            margin-bottom: 1.25rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: center;
+        }
+
+        .result-text {
+            line-height: 1.7;
+            color: #cbd5e1;
+            margin: 0;
+            font-size: 1.05rem;
+        }
+
+        .badge {
+            background: rgba(59, 130, 246, 0.15);
+            color: #93c5fd;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>Private Search Hub</h1>
+        <p>100% Offline • End-to-End Enterprise Retrieval</p>
+    </div>
+
+    <div class="search-box">
+        <input type="text" id="queryInput" placeholder="What are you looking for?" onkeypress="handleEnter(event)">
+        <button onclick="performSearch()">Search</button>
+    </div>
+
+    <div id="loader">Running local neural inference...</div>
+    <div id="resultsArea"></div>
+</div>
+
+<script>
+    function handleEnter(e) {
+        if(e.key === 'Enter') performSearch();
+    }
+
+    async function performSearch() {
+        const query = document.getElementById('queryInput').value.trim();
+        if (!query) return;
+
+        document.getElementById('loader').style.display = 'block';
+        document.getElementById('resultsArea').innerHTML = '';
+
+        try {
+            const response = await fetch('/api/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: query, top_k: 5 })
+            });
+
+            const data = await response.json();
+            
+            if (!response.ok) {
+                if(response.status === 404) {
+                    alert("Index not found. Please run the CLI index command first on your documents.");
+                } else {
+                    alert('Error: ' + JSON.stringify(data));
+                }
+                return;
+            }
+
+            if (data.length === 0) {
+                document.getElementById('resultsArea').innerHTML = '<p style="text-align:center; color:#94a3b8;">No matching files found.</p>';
+            } else {
+                data.forEach((item, index) => {
+                    const card = document.createElement('div');
+                    card.className = 'result-card';
+                    
+                    const badges = item.matched_by.map(m => `<span class="badge">${m.replace('_', ' ')}</span>`).join('');
+                    
+                    card.innerHTML = `
+                        <h3>${index + 1}. ${item.file_name}</h3>
+                        <div class="result-meta">
+                            <strong>Path:</strong> ${item.relative_path} | 
+                            <strong>Confidence:</strong> ${(item.score * 100).toFixed(1)}% |
+                            ${badges}
+                        </div>
+                        <p class="result-text">${item.text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+                    `;
+                    document.getElementById('resultsArea').appendChild(card);
+                });
+            }
+        } catch (err) {
+            alert('Failed to connect to the local server.');
+        } finally {
+            document.getElementById('loader').style.display = 'none';
+        }
+    }
+</script>
+
+</body>
+</html>

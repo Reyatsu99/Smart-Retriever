@@ -7,7 +7,7 @@ BACKUP_INDEX_DIR = Path("index_v2_backup")
 MANIFEST_BACKUP_NAME = "manifest_v2.backup.json"
 
 MANIFEST_VERSION = 3
-EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIM = 384
 MAX_CHUNK_CHARS = 1200
 CHUNK_OVERLAP_CHARS = 150

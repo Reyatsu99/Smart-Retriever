@@ -29,3 +29,10 @@ scratch/
 mini_benchmark.py
 test_search.py
 test_eval.py
+lancedb_store/
+
+# Reports and Privacy (Excluding for branch submission)
+*.tex
+*.bib
+report.txt
+evaluation_results.md
