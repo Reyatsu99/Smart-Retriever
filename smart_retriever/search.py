@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -114,18 +115,77 @@ class SearchEngine:
 
 
 
+def _resolve_result_path(result: dict[str, Any]) -> str:
+    """Returns the absolute file path for a result, reconstructing it from
+    relative_path + DATA_DIR if the 'path' field wasn't already populated."""
+    if result.get("path"):
+        return result["path"]
+    return str((settings.DATA_DIR / result["relative_path"]).resolve())
+
+
+def _file_uri(path_str: str) -> str:
+    """Builds a proper file:// URI from an absolute path string."""
+    try:
+        return Path(path_str).resolve().as_uri()
+    except (ValueError, OSError):
+        return f"file://{path_str}"
+
+
+def _hyperlink(uri: str, label: str) -> str:
+    """Wraps label in an OSC 8 terminal hyperlink escape sequence so supporting
+    terminals (iTerm2, GNOME Terminal, Windows Terminal, VS Code, etc.) render
+    it as clickable. Falls back to plain label when stdout isn't a tty (piped
+    output, redirected to a file) or NO_COLOR is set, so output stays clean."""
+    if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
+        return label
+    return f"\033]8;;{uri}\033\\{label}\033]8;;\033\\"
+
+
+def _format_file_link(path_str: str) -> tuple[str, str]:
+    """Returns (plain_path, clickable_link) for displaying a file location."""
+    uri = _file_uri(path_str)
+    return path_str, _hyperlink(uri, uri)
+
+
 def _print_results(results: list[dict[str, Any]]) -> None:
     if not results:
         print("No matching files found.")
         return
     print(f"Found {len(results)} result(s):\n")
     for rank, result in enumerate(results, start=1):
+        plain_path, link = _format_file_link(_resolve_result_path(result))
         print(
             f"{rank}. {result['relative_path']}\n"
             f"   score: {result['score']:.4f}\n"
             f"   shard: {result['shard']}\n"
-            f"   matched by: {', '.join(result['matched_by']) if result['matched_by'] else 'routing only'}"
+            f"   matched by: {', '.join(result['matched_by']) if result['matched_by'] else 'routing only'}\n"
+            f"   path: {plain_path}\n"
+            f"   link: {link}"
         )
+
+
+def _print_audit_reports(reports: list[dict[str, Any]], header: str) -> None:
+    print(f"\n{header}\n" + "=" * 40)
+    for r in reports:
+        audit_data = r["audit"]
+        is_authentic = audit_data.get("is_authentic", True)
+        status_prefix = "[VERIFIED]" if is_authentic else "[!!! BOGUS / SPOOFED !!!]"
+        plain_path, link = _format_file_link(_resolve_result_path(r))
+
+        print(f"\nFILE: {r['file_name']} {status_prefix}")
+        print(f"  path: {plain_path}")
+        print(f"  link: {link}")
+        if not is_authentic:
+            print(f"  Warning: {audit_data.get('authenticity_reason')}")
+
+        if "requirements" in audit_data:
+            for req in audit_data["requirements"]:
+                status = req.get("status", "UNKNOWN")
+                print(f"- [{status}] {req.get('name')}")
+                if req.get("reason"):
+                    print(f"  Reason: {req['reason']}")
+        print(f"Summary: {audit_data.get('overall_summary', 'N/A')}")
+    print("=" * 40 + "\n")
 
 
 def _prompt(message: str, default: str | None = None) -> str:
@@ -303,24 +363,7 @@ def _run_menu() -> int:
                 from smart_retriever.auditor import DocumentAuditor
                 auditor = DocumentAuditor(engine)
                 reports = auditor.audit(query, requirements)
-                
-                print("\nAUDIT RESULTS:\n" + "="*40)
-                for r in reports:
-                    audit_data = r['audit']
-                    is_authentic = audit_data.get("is_authentic", True)
-                    status_prefix = "[VERIFIED]" if is_authentic else "[!!! BOGUS / SPOOFED !!!]"
-                    
-                    print(f"\nFILE: {r['file_name']} {status_prefix}")
-                    if not is_authentic:
-                        print(f"  Warning: {audit_data.get('authenticity_reason')}")
-                        
-                    if "requirements" in audit_data:
-                        for req in audit_data["requirements"]:
-                            status = req.get("status", "UNKNOWN")
-                            print(f"- [{status}] {req.get('name')}")
-                            if req.get("reason"): print(f"  Reason: {req['reason']}")
-                    print(f"Summary: {audit_data.get('overall_summary', 'N/A')}")
-                print("="*40 + "\n")
+                _print_audit_reports(reports, "AUDIT RESULTS:")
             elif choice == "6":
                 query = _prompt("Search query for autonomous verification")
                 index_dir = _prompt("Index folder", str(settings.INDEX_DIR))
@@ -329,24 +372,7 @@ def _run_menu() -> int:
                 from smart_retriever.auditor import DocumentAuditor
                 auditor = DocumentAuditor(engine)
                 reports = auditor.auto_verify(query)
-                
-                print("\nAUTO-VERIFICATION RESULTS:\n" + "="*40)
-                for r in reports:
-                    audit_data = r['audit']
-                    is_authentic = audit_data.get("is_authentic", True)
-                    status_prefix = "[VERIFIED]" if is_authentic else "[!!! BOGUS / SPOOFED !!!]"
-                    
-                    print(f"\nFILE: {r['file_name']} {status_prefix}")
-                    if not is_authentic:
-                        print(f"  Warning: {audit_data.get('authenticity_reason')}")
-
-                    if "requirements" in audit_data:
-                        for req in audit_data["requirements"]:
-                            status = req.get("status", "UNKNOWN")
-                            print(f"- [{status}] {req.get('name')}")
-                            if req.get("reason"): print(f"  Reason: {req['reason']}")
-                    print(f"Summary: {audit_data.get('overall_summary', 'N/A')}")
-                print("="*40 + "\n")
+                _print_audit_reports(reports, "AUTO-VERIFICATION RESULTS:")
             elif choice == "7":
                 print("Goodbye.")
                 return 0
