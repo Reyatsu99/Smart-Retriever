@@ -35,6 +35,7 @@ def run_public_evaluation(
     pool: str = "auto",
     pool_depth: int = 100,
     mode: str = "real",
+    search_mode: str = "full",
     force: bool = False,
     work_dir: Path | str = DEFAULT_EVAL_WORK_DIR,
     keep_workspace: bool = True,
@@ -78,8 +79,8 @@ def run_public_evaluation(
     from smart_retriever.search import SearchEngine
 
     engine = SearchEngine(index_dir=index_dir, embedder=embedder)
-    print(f"Running {len(selected_queries)} queries...")
-    run_output = _run_queries(engine, selected_queries, doc_mapping, top_k=top_k)
+    print(f"Running {len(selected_queries)} queries (search_mode={search_mode})...")
+    run_output = _run_queries(engine, selected_queries, doc_mapping, top_k=top_k, search_mode=search_mode)
     run = run_output["run"]
     avg_latency = run_output["avg_latency_ms"]
     
@@ -100,6 +101,7 @@ def run_public_evaluation(
         "pool": resolved_pool,
         "pool_depth": pool_depth if resolved_pool == "scoreddocs" else None,
         "mode": mode,
+        "search_mode": search_mode,
         "top_k": top_k,
         "query_offset": query_offset,
         "queries_evaluated": len(selected_queries),
@@ -334,7 +336,7 @@ def _doc_text(doc: Any) -> str:
     return "\n".join(parts)
 
 
-def _run_queries(engine: Any, queries: list[EvalQuery], doc_mapping: dict[str, dict[str, str]], *, top_k: int) -> dict[str, Any]:
+def _run_queries(engine: Any, queries: list[EvalQuery], doc_mapping: dict[str, dict[str, str]], *, top_k: int, search_mode: str = "full") -> dict[str, Any]:
     import time
     doc_id_by_path = {payload["relative_path"]: doc_id for doc_id, payload in doc_mapping.items()}
     run_results: dict[str, list[dict[str, Any]]] = {}
@@ -342,7 +344,7 @@ def _run_queries(engine: Any, queries: list[EvalQuery], doc_mapping: dict[str, d
     
     for query in queries:
         start_time = time.perf_counter()
-        results = engine.search(query.text, top_k=top_k)
+        results = engine.search(query.text, top_k=top_k, search_mode=search_mode)
         end_time = time.perf_counter()
         latencies.append((end_time - start_time) * 1000) # ms
         

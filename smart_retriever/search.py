@@ -11,6 +11,7 @@ from smart_retriever import settings
 from smart_retriever.db import get_db
 from smart_retriever.embeddings import EmbeddingBackend
 from smart_retriever.indexer import build_index
+from smart_retriever.text_utils import tokenize
 
 
 class SearchEngine:
@@ -26,7 +27,13 @@ class SearchEngine:
         except Exception:
             self.reranker = None
 
-    def search(self, query: str, top_k: int = settings.DEFAULT_TOP_K) -> list[dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        top_k: int = settings.DEFAULT_TOP_K,
+        search_mode: str = "full",
+        rerank_depth: int = settings.DEFAULT_RERANK_DEPTH
+    ) -> list[dict[str, Any]]:
         table_name = "document_chunks"
         if table_name not in self.db.table_names():
             raise FileNotFoundError("Index not found. Run `python cli.py index` first.")
@@ -35,70 +42,86 @@ class SearchEngine:
         if table.count_rows() == 0:
             return []
             
-        query_vector = self.embedder.encode_document(query).tolist()
-        
-        # Stage 1: Hybrid Retrieval (Vector + Keyword)
         pool_size = max(100, top_k * 10)
         
         # A. Vector Search
-        vector_hits = table.search(query_vector).limit(pool_size).to_arrow().to_pylist()
+        vector_hits = []
+        if search_mode in {"full", "hybrid", "vector_only"}:
+            query_vector = self.embedder.encode_document(query).tolist()
+            vector_hits = table.search(query_vector).limit(pool_size).to_arrow().to_pylist()
         
-        # B. Keyword Search (FTS)
+        # B. Keyword Search (FTS) with Semantic Alias Query Expansion
         fts_hits = []
-        try:
-            fts_hits = table.search(query, query_type="fts").limit(pool_size).to_arrow().to_pylist()
-        except Exception as exc:
-            # FTS might not be initialized or query too short
-            pass
+        if search_mode in {"full", "hybrid", "fts_only"}:
+            try:
+                expanded_tokens = tokenize(query, expand_semantics=True)
+                fts_query = " ".join(expanded_tokens) if expanded_tokens else query
+                fts_hits = table.search(fts_query, query_type="fts").limit(pool_size).to_arrow().to_pylist()
+            except Exception as exc:
+                pass
 
-        # C. Reciprocal Rank Fusion (RRF) to merge results
-        rrf_scores: dict[str, float] = {}
-        # k is the constant used in RRF formula (standard is 60)
-        RRF_K = 60
-        
         hits_by_id: dict[str, dict[str, Any]] = {}
-        
-        # Function to add scores from a ranked list
-        def add_rrf_scores(ranked_list, source_name):
-            for rank, hit in enumerate(ranked_list):
-                # Use relative_path + chunk_id as unique key for chunks
-                hit_id = f"{hit['relative_path']}_{hit['chunk_id']}"
-                hits_by_id[hit_id] = hit
-                rrf_scores[hit_id] = rrf_scores.get(hit_id, 0.0) + 1.0 / (RRF_K + rank + 1)
-                hit.setdefault("matched_by", []).append(source_name)
+        hits: list[dict[str, Any]] = []
 
-        add_rrf_scores(vector_hits, "vector")
-        add_rrf_scores(fts_hits, "keyword")
-        
-        # Get sorted hit IDs by RRF score
-        sorted_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)[:pool_size]
-        hits = [hits_by_id[hid] for hid in sorted_ids]
-        
-        if not hits:
-            return []
-            
-        # Stage 2: Semantic Reranking (Cross-Encoder)
-        if self.reranker:
-            pairs = [[query, hit["text"]] for hit in hits]
-            scores = self.reranker.predict(pairs)
-            for hit, score in zip(hits, scores):
-                hit["score"] = float(score)
-                hit["matched_by"].append("semantic_reranker")
-                hit["matched_by"] = sorted(list(set(hit["matched_by"])))
+        if search_mode == "vector_only":
+            hits = vector_hits
+            for rank, hit in enumerate(hits):
+                hit["score"] = 1.0 / (rank + 1)
+                hit.setdefault("matched_by", []).append("vector")
+        elif search_mode == "fts_only":
+            hits = fts_hits
+            for rank, hit in enumerate(hits):
+                hit["score"] = 1.0 / (rank + 1)
+                hit.setdefault("matched_by", []).append("keyword")
         else:
-            # Fallback to normalized RRF score
+            # C. Reciprocal Rank Fusion (RRF) to merge results
+            rrf_scores: dict[str, float] = {}
+            RRF_K = 60
+            
+            def add_rrf_scores(ranked_list, source_name):
+                for rank, hit in enumerate(ranked_list):
+                    hit_id = f"{hit['relative_path']}_{hit['chunk_id']}"
+                    hits_by_id[hit_id] = hit
+                    rrf_scores[hit_id] = rrf_scores.get(hit_id, 0.0) + 1.0 / (RRF_K + rank + 1)
+                    hit.setdefault("matched_by", []).append(source_name)
+
+            add_rrf_scores(vector_hits, "vector")
+            add_rrf_scores(fts_hits, "keyword")
+            
+            sorted_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)[:pool_size]
+            hits = [hits_by_id[hid] for hid in sorted_ids]
+            
             for hit_id, score in rrf_scores.items():
                 hit = hits_by_id[hit_id]
                 hit["score"] = score
                 hit["matched_by"] = sorted(list(set(hit["matched_by"])))
 
+        if not hits:
+            return []
+            
+        # Stage 2: Semantic Reranking (Cross-Encoder)
+        # Optimized: rerank only the top candidate pool (default top 25) instead of all 100
+        if search_mode == "full" and self.reranker:
+            candidates_to_rerank = hits[:rerank_depth]
+            pairs = [[query, hit["text"]] for hit in candidates_to_rerank]
+            scores = self.reranker.predict(pairs, batch_size=32)
+            
+            for hit, score in zip(candidates_to_rerank, scores):
+                hit["score"] = float(score)
+                hit.setdefault("matched_by", []).append("semantic_reranker")
+                hit["matched_by"] = sorted(list(set(hit["matched_by"])))
+            
+            # Re-sort hits so reranked candidates take precedence
+            hits = sorted(hits, key=lambda x: x["score"], reverse=True)
+
         # Aggregate top chunks back to Document level
         merged: dict[str, dict[str, Any]] = {}
         for hit in hits:
             rp = hit["relative_path"]
+            matched = hit.get("matched_by", [])
             if rp not in merged or hit["score"] > merged[rp]["score"]:
                 merged[rp] = {
-                    "matched_by": hit["matched_by"],
+                    "matched_by": matched,
                     "relative_path": rp,
                     "file_name": Path(rp).name,
                     "path": str((settings.DATA_DIR / rp).resolve()),

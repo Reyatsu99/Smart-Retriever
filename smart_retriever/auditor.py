@@ -57,24 +57,43 @@ Criteria:"""
         
         return self.audit(query, requirements, top_k=top_k)
 
+    def _get_full_document_text(self, relative_path: str) -> str:
+        """Fetch and reconstruct all chunks for a document from LanceDB in order."""
+        try:
+            table_name = "document_chunks"
+            if table_name not in self.search_engine.db.table_names():
+                return ""
+            table = self.search_engine.db.open_table(table_name)
+            # Escape single quotes in path if present
+            safe_path = relative_path.replace("'", "''")
+            chunks = table.search().where(f"relative_path = '{safe_path}'").to_arrow().to_pylist()
+            if not chunks:
+                return ""
+            chunks = sorted(chunks, key=lambda x: x.get("chunk_id", 0))
+            return "\n\n".join(c["text"] for c in chunks if "text" in c)
+        except Exception as exc:
+            LOGGER.warning(f"Failed to fetch full document text for {relative_path}: {exc}")
+            return ""
+
     def audit(self, query: str, requirements: List[str], top_k: int = 3) -> List[Dict[str, Any]]:
         """
-        Search for relevant documents and audit them against requirements.
+        Search for relevant documents and audit full document text against requirements.
         """
-        # 1. Search for relevant chunks
+        # 1. Search for relevant documents
         results = self.search_engine.search(query, top_k=top_k)
         
         audit_reports = []
         
         for res in results:
-            context = res['text']
+            full_text = self._get_full_document_text(res['relative_path'])
+            context = full_text if full_text else res['text']
             file_name = res['file_name']
             
             # 2. Build the audit prompt
             req_list_str = "\n".join([f"- {req}" for req in requirements])
             prompt = f"""AUDIT REQUEST for Document: {file_name}
             
-DOCUMENT SEGMENT:
+DOCUMENT CONTENT:
 ---
 {context}
 ---
@@ -85,7 +104,7 @@ REQUIREMENTS TO VERIFY:
 Please perform the audit and return the JSON report."""
 
             # 3. Call the LLM
-            print(f"Auditing '{file_name}'...")
+            print(f"Auditing '{file_name}' (full context)...")
             report = self.llm.generate_json(prompt, system_prompt=AUDIT_SYSTEM_PROMPT)
             
             # 4. Attach metadata
