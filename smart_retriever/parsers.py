@@ -18,12 +18,12 @@ def extract_text(path: Path) -> str:
 
 def _extract_pdf(path: Path) -> str:
     try:
-        import pymupdf  # PyMuPDF
+        import pymupdf  # type: ignore # PyMuPDF
         with pymupdf.open(str(path)) as doc:
             return "\n".join(page.get_text() for page in doc)
     except ImportError:
         try:
-            from PyPDF2 import PdfReader
+            from PyPDF2 import PdfReader  # type: ignore
             reader = PdfReader(str(path))
             return "\n".join(page.extract_text() or "" for page in reader.pages)
         except Exception:
@@ -34,7 +34,7 @@ def _extract_pdf(path: Path) -> str:
 
 def _extract_docx(path: Path) -> str:
     try:
-        import docx
+        import docx  # type: ignore
     except ImportError:
         return ""
     document = docx.Document(str(path))
@@ -43,7 +43,7 @@ def _extract_docx(path: Path) -> str:
 
 def _extract_xlsx(path: Path) -> str:
     try:
-        from openpyxl import load_workbook
+        from openpyxl import load_workbook  # type: ignore
     except ImportError:
         return ""
     workbook = load_workbook(filename=str(path), read_only=True, data_only=True)
