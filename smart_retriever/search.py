@@ -48,7 +48,7 @@ class SearchEngine:
         vector_hits = []
         if search_mode in {"full", "hybrid", "vector_only"}:
             query_vector = self.embedder.encode_document(query).tolist()
-            vector_hits = table.search(query_vector).limit(pool_size).to_arrow().to_pylist()
+            vector_hits = table.search(query_vector).select(["relative_path", "chunk_id", "text", "mtime", "size", "sha256", "_distance"]).limit(pool_size).to_arrow().to_pylist()
         
         # B. Keyword Search (FTS) with Semantic Alias Query Expansion
         fts_hits = []
@@ -56,7 +56,7 @@ class SearchEngine:
             try:
                 expanded_tokens = tokenize(query, expand_semantics=True)
                 fts_query = " ".join(expanded_tokens) if expanded_tokens else query
-                fts_hits = table.search(fts_query, query_type="fts").limit(pool_size).to_arrow().to_pylist()
+                fts_hits = table.search(fts_query, query_type="fts").select(["relative_path", "chunk_id", "text", "mtime", "size", "sha256", "_score"]).limit(pool_size).to_arrow().to_pylist()
             except Exception as exc:
                 pass
 

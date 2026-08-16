@@ -141,20 +141,22 @@ async def list_documents():
             return {"documents": [], "total_chunks": 0}
         
         tbl = se.db.open_table("document_chunks")
-        df = tbl.to_arrow().to_pydict()
+        
+        # Optimize memory usage: don't load the vectors or text.
+        # Use select to only retrieve necessary columns and set a large limit.
+        arrow_table = tbl.search().limit(1000000).select(["relative_path", "size", "mtime"]).to_arrow()
+        df = arrow_table.to_pydict()
         
         docs_map: Dict[str, Dict[str, Any]] = {}
-        for rp, fn, sz, mt, chunk_id in zip(
+        for rp, sz, mt in zip(
             df.get("relative_path", []),
-            df.get("file_name", []),
             df.get("size", []),
-            df.get("mtime", []),
-            df.get("chunk_id", [])
+            df.get("mtime", [])
         ):
             if rp not in docs_map:
                 docs_map[rp] = {
                     "relative_path": rp,
-                    "file_name": fn,
+                    "file_name": Path(rp).name,
                     "size_bytes": sz,
                     "mtime": mt,
                     "chunk_count": 0
