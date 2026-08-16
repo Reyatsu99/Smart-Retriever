@@ -18,11 +18,18 @@ def extract_text(path: Path) -> str:
 
 def _extract_pdf(path: Path) -> str:
     try:
-        from PyPDF2 import PdfReader
+        import pymupdf  # PyMuPDF
+        with pymupdf.open(str(path)) as doc:
+            return "\n".join(page.get_text() for page in doc)
     except ImportError:
+        try:
+            from PyPDF2 import PdfReader
+            reader = PdfReader(str(path))
+            return "\n".join(page.extract_text() or "" for page in reader.pages)
+        except Exception:
+            return ""
+    except Exception:
         return ""
-    reader = PdfReader(str(path))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
 def _extract_docx(path: Path) -> str:
