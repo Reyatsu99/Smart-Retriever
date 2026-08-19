@@ -10,9 +10,21 @@ from smart_retriever import settings
 from smart_retriever.text_utils import chunk_text
 
 
+def _get_device() -> str:
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
+
+
 @lru_cache(maxsize=2)
 def _load_model(model_name: str) -> SentenceTransformer:
-    return SentenceTransformer(model_name)
+    return SentenceTransformer(model_name, device=_get_device())
 
 
 class EmbeddingBackend:

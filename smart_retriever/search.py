@@ -22,8 +22,9 @@ class SearchEngine:
         
         try:
             from sentence_transformers import CrossEncoder
+            from smart_retriever.embeddings import _get_device
             # We use a fast cross-encoder to prevent timeouts but boost precision significantly
-            self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
+            self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512, device=_get_device())
         except Exception:
             self.reranker = None
 
